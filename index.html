@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>艦隊司令：深海行動</title>
+    <style>
+        :root {
+            --bg-color: #0b0e14;
+            --card-bg: #1a1f29;
+            --accent: #00d2ff;
+            --hit: #ff4757;
+            --miss: #57606f;
+            --ship: #747d8c;
+            --text: #ffffff;
+        }
+        body {
+            background-color: var(--bg-color);
+            color: var(--text);
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            margin: 0;
+            padding: 20px;
+        }
+        h1 { color: var(--accent); text-shadow: 0 0 10px rgba(0,210,255,0.5); }
+        .info-panel {
+            background: var(--card-bg);
+            padding: 15px 25px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            text-align: center;
+            border: 1px solid #333;
+        }
+        .mode-selector { margin-bottom: 20px; }
+        button {
+            background: transparent;
+            border: 1px solid var(--accent);
+            color: var(--accent);
+            padding: 8px 16px;
+            cursor: pointer;
+            transition: 0.3s;
+            margin: 0 5px;
+            border-radius: 4px;
+        }
+        button:hover, button.active {
+            background: var(--accent);
+            color: #000;
+        }
+        .game-container { display: flex; gap: 40px; flex-wrap: wrap; justify-content: center; }
+        .grid-wrapper { text-align: center; }
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(10, 35px);
+            grid-template-rows: repeat(10, 35px);
+            gap: 2px;
+            background-color: #2f3542;
+            padding: 5px;
+            border: 2px solid #57606f;
+        }
+        .cell {
+            width: 35px;
+            height: 35px;
+            background-color: var(--card-bg);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        /* 狀態樣式 */
+        .status-1 { background-color: var(--ship); border: 1px solid var(--accent); } /* 船隻實體 */
+        .status-2 { background-color: var(--hit) !important; color: white; animation: flash 0.5s; } /* 擊中 */
+        .status-3 { background-color: var(--miss) !important; color: #ccc; } /* 沒中 */
+        
+        @keyframes flash {
+            from { opacity: 0; } to { opacity: 1; }
+        }
+        .hidden-ship .status-1 { background-color: var(--card-bg); border: none; } /* 隱藏敵船 */
+        .hotkeys { margin-top: 30px; font-size: 0.8rem; color: #888; }
+    </style>
+</head>
+<body>
+
+    <h1>艦隊司令：深海行動</h1>
+
+    <div class="mode-selector">
+        <button id="pveBtn" class="active" onclick="setMode('PVE')">單人挑戰 (PVE)</button>
+        <button id="pvpBtn" onclick="setMode('PVP')">雙人對戰 (PVP)</button>
+    </div>
+
+    <div class="info-panel">
+        <div id="turn-indicator">準備開戰...</div>
+        <div id="msg">按 [N] 開始新遊戲</div>
+    </div>
+
+    <div class="game-container">
+        <div class="grid-wrapper">
+            <h3 id="p1-label">你的艦隊</h3>
+            <div id="player1-board" class="grid"></div>
+        </div>
+        <div class="grid-wrapper" id="p2-area">
+            <h3 id="p2-label">敵方海域</h3>
+            <div id="player2-board" class="grid hidden-ship"></div>
+        </div>
+    </div>
+
+    <div class="hotkeys">
+        快捷鍵：[N] 新遊戲 | [S] 切換雙人模式
+    </div>
+
+    <script>
+        const SIZE = 10;
+        const SHIPS = [5, 4, 3, 3, 2];
+        let gameMode = 'PVE'; // PVE 或 PVP
+        let currentPlayer = 1; 
+        let boards = {
+            1: { data: [], hits: 0 },
+            2: { data: [], hits: 0 }
+        };
+
+        // 初始化遊戲
+        function initGame() {
+            boards[1].data = Array(SIZE).fill().map(() => Array(SIZE).fill(0));
+            boards[2].data = Array(SIZE).fill().map(() => Array(SIZE).fill(0));
+            boards[1].hits = 0;
+            boards[2].hits = 0;
+            
+            placeAllShips(1);
+            placeAllShips(2);
+            
+            currentPlayer = 1;
+            updateUI();
+            renderBoards();
+        }
+
+        function placeAllShips(player) {
+            SHIPS.forEach(len => {
+                let placed = false;
+                while (!placed) {
+                    let isVert = Math.random() < 0.5;
+                    let r = Math.floor(Math.random() * (isVert ? SIZE - len : SIZE));
+                    let c = Math.floor(Math.random() * (isVert ? SIZE : SIZE - len));
+                    if (canPlace(player, r, c, len, isVert)) {
+                        for (let i = 0; i < len; i++) {
+                            boards[player].data[isVert ? r + i : r][isVert ? c : c + i] = 1;
+                        }
+                        placed = true;
+                    }
+                }
+            });
+        }
+
+        function canPlace(p, r, c, len, vert) {
+            for (let i = 0; i < len; i++) {
+                if (boards[p].data[vert ? r + i : r][vert ? c : c + i] !== 0) return false;
+            }
+            return true;
+        }
+
+        function renderBoards() {
+            draw('player1-board', 1, gameMode === 'PVP'); 
+            draw('player2-board', 2, true); 
+        }
+
+        function draw(elementId, pNum, isHidden) {
+            const el = document.getElementById(elementId);
+            el.innerHTML = '';
+            el.className = isHidden ? 'grid hidden-ship' : 'grid';
+            
+            for (let r = 0; r < SIZE; r++) {
+                for (let c = 0; c < SIZE; c++) {
+                    const cell = document.createElement('div');
+                    const val = boards[pNum].data[r][c];
+                    cell.className = `cell status-${val}`;
+                    if (val === 2) cell.innerText = '✕';
+                    if (val === 3) cell.innerText = '○';
+                    
+                    cell.onclick = () => handleAttack(pNum, r, c);
+                    el.appendChild(cell);
+                }
+            }
+        }
+
+        function handleAttack(targetP, r, c) {
+            if (gameMode === 'PVE' && targetP === 1) return; // 單人模式不能打自己
+            if (boards[targetP].data[r][c] > 1) return;
+
+            const isHit = boards[targetP].data[r][c] === 1;
+            boards[targetP].data[r][c] = isHit ? 2 : 3;
+            if (isHit) boards[targetP].hits++;
+
+            if (boards[targetP].hits === 17) {
+                alert(`遊戲結束！玩家 ${3 - targetP} 獲勝！`);
+                initGame();
+                return;
+            }
+
+            if (gameMode === 'PVE') {
+                enemyTurn();
+            } else {
+                currentPlayer = currentPlayer === 1 ? 2 : 1;
+                updateUI();
+            }
+            renderBoards();
+        }
+
+        function enemyTurn() {
+            let r, c;
+            do {
+                r = Math.floor(Math.random() * SIZE);
+                c = Math.floor(Math.random() * SIZE);
+            } while (boards[1].data[r][c] > 1);
+            
+            if (boards[1].data[r][c] === 1) boards[1].hits++;
+            boards[1].data[r][c] = boards[1].data[r][c] === 1 ? 2 : 3;
+        }
+
+        function updateUI() {
+            const indicator = document.getElementById('turn-indicator');
+            if (gameMode === 'PVE') {
+                indicator.innerText = "⚡ 戰鬥進行中";
+            } else {
+                indicator.innerText = `🎮 現在輪到：玩家 ${currentPlayer} 攻擊`;
+            }
+        }
+
+        function setMode(m) {
+            gameMode = m;
+            document.getElementById('pveBtn').className = m === 'PVE' ? 'active' : '';
+            document.getElementById('pvpBtn').className = m === 'PVP' ? 'active' : '';
+            document.getElementById('p2-label').innerText = m === 'PVE' ? '敵方海域' : '玩家 2 艦隊';
+            initGame();
+        }
+
+        // 快捷鍵監聽
+        window.addEventListener('keydown', (e) => {
+            if (e.key.toLowerCase() === 'n') initGame();
+            if (e.key.toLowerCase() === 's') setMode(gameMode === 'PVE' ? 'PVP' : 'PVE');
+        });
+
+        initGame();
+    </script>
+</body>
+</html>
